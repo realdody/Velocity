@@ -25,23 +25,23 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * from backend servers (e.g., BetterCompatibilityChecker mod data).
  */
 public record ServerPingResponse(
-        ServerPing ping,
-        byte @Nullable [] trailingData) {
-    /**
-     * Creates a ServerPingResponse with no trailing data.
-     *
-     * @param ping the server ping
-     */
-    public ServerPingResponse(ServerPing ping) {
-        this(ping, null);
-    }
+    ServerPing ping,
+    byte @Nullable [] trailingData) {
+  /**
+   * Creates a ServerPingResponse with no trailing data.
+   *
+   * @param ping the server ping
+   */
+  public ServerPingResponse(ServerPing ping) {
+    this(ping, null);
+  }
 
-    /**
-     * Checks if this response has trailing data.
-     *
-     * @return true if trailing data is present
-     */
-    public boolean hasTrailingData() {
-        return trailingData != null && trailingData.length > 0;
-    }
+  /**
+   * Checks if this response has trailing data.
+   *
+   * @return true if trailing data is present
+   */
+  public boolean hasTrailingData() {
+    return trailingData != null && trailingData.length > 0;
+  }
 }
