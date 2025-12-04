@@ -33,19 +33,20 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Session handler used to implement {@link VelocityRegisteredServer#ping(EventLoop,
+ * Session handler used to implement
+ * {@link VelocityRegisteredServer#ping(EventLoop,
  * com.velocitypowered.api.proxy.server.PingOptions)}.
  */
 public class PingSessionHandler implements MinecraftSessionHandler {
 
-  private final CompletableFuture<ServerPing> result;
+  private final CompletableFuture<ServerPingResponse> result;
   private final RegisteredServer server;
   private final MinecraftConnection connection;
   private final ProtocolVersion version;
   private boolean completed = false;
   private final String virtualHostString;
 
-  PingSessionHandler(CompletableFuture<ServerPing> result, RegisteredServer server,
+  PingSessionHandler(CompletableFuture<ServerPingResponse> result, RegisteredServer server,
       MinecraftConnection connection, ProtocolVersion version, String virtualHostString) {
     this.result = result;
     this.server = server;
@@ -59,7 +60,8 @@ public class PingSessionHandler implements MinecraftSessionHandler {
     HandshakePacket handshake = new HandshakePacket();
     handshake.setIntent(HandshakeIntent.STATUS);
     handshake.setServerAddress(this.virtualHostString == null || this.virtualHostString.isEmpty()
-            ? server.getServerInfo().getAddress().getHostString() : this.virtualHostString);
+        ? server.getServerInfo().getAddress().getHostString()
+        : this.virtualHostString);
     handshake.setPort(server.getServerInfo().getAddress().getPort());
     handshake.setProtocolVersion(version);
     connection.delayedWrite(handshake);
@@ -79,7 +81,8 @@ public class PingSessionHandler implements MinecraftSessionHandler {
 
     ServerPing ping = VelocityServer.getPingGsonInstance(version).fromJson(packet.getStatus(),
         ServerPing.class);
-    result.complete(ping);
+    // Preserve trailing data (e.g., BetterCompatibilityChecker mod data)
+    result.complete(new ServerPingResponse(ping, packet.getTrailingData()));
     return true;
   }
 

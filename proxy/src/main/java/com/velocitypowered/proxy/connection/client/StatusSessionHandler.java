@@ -67,7 +67,7 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
     }
     this.pingReceived = true;
     server.getServerListPingHandler().getInitialPing(this.inbound)
-        .thenCompose(ping -> server.getEventManager().fire(new ProxyPingEvent(inbound, ping)))
+        .thenCompose(pingResponse -> server.getEventManager().fire(new ProxyPingEvent(inbound, pingResponse.ping())))
         .thenAcceptAsync(event -> {
           if (event.getResult().isAllowed()) {
             connection.closeWith(LegacyDisconnect.fromServerPing(event.getPing(), packet.getVersion()));
@@ -96,14 +96,20 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
     this.pingReceived = true;
 
     this.server.getServerListPingHandler().getInitialPing(inbound)
-        .thenCompose(ping -> server.getEventManager().fire(new ProxyPingEvent(inbound, ping)))
+        .thenCompose(pingResponse -> {
+          // Fire ProxyPingEvent with the ServerPing (API-compatible)
+          // but preserve trailing data for the response
+          return server.getEventManager().fire(new ProxyPingEvent(inbound, pingResponse.ping()))
+              .thenApply(event -> new PingEventResult(event, pingResponse.trailingData()));
+        })
         .thenAcceptAsync(
-            (event) -> {
-              if (event.getResult().isAllowed()) {
+            (result) -> {
+              if (result.event.getResult().isAllowed()) {
                 final StringBuilder json = new StringBuilder();
                 VelocityServer.getPingGsonInstance(connection.getProtocolVersion())
-                        .toJson(event.getPing(), json);
-                connection.write(new StatusResponsePacket(json));
+                    .toJson(result.event.getPing(), json);
+                // Include trailing data (e.g., BetterCompatibilityChecker mod data)
+                connection.write(new StatusResponsePacket(json, result.trailingData));
               } else {
                 connection.close();
               }
@@ -122,8 +128,10 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
     connection.close(true);
   }
 
-  private enum State {
-    AWAITING_REQUEST,
-    RECEIVED_REQUEST
+  /**
+   * Internal record to pass both ProxyPingEvent and trailing data through the
+   * async chain.
+   */
+  private record PingEventResult(ProxyPingEvent event, byte[] trailingData) {
   }
 }

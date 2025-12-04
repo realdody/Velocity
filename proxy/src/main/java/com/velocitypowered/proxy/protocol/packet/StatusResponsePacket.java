@@ -28,12 +28,19 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class StatusResponsePacket implements MinecraftPacket {
 
   private @Nullable CharSequence status;
+  private byte @Nullable [] trailingData;
 
   public StatusResponsePacket() {
   }
 
   public StatusResponsePacket(CharSequence status) {
     this.status = status;
+    this.trailingData = null;
+  }
+
+  public StatusResponsePacket(CharSequence status, byte @Nullable [] trailingData) {
+    this.status = status;
+    this.trailingData = trailingData;
   }
 
   public String getStatus() {
@@ -43,16 +50,30 @@ public class StatusResponsePacket implements MinecraftPacket {
     return status.toString();
   }
 
+  public byte @Nullable [] getTrailingData() {
+    return trailingData;
+  }
+
+  public void setTrailingData(byte @Nullable [] trailingData) {
+    this.trailingData = trailingData;
+  }
+
   @Override
   public String toString() {
     return "StatusResponse{"
         + "status='" + status + '\''
+        + ", trailingDataLength=" + (trailingData != null ? trailingData.length : 0)
         + '}';
   }
 
   @Override
   public void decode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion version) {
     status = ProtocolUtils.readString(buf, Short.MAX_VALUE);
+    // Preserve any trailing bytes (e.g., BetterCompatibilityChecker mod data)
+    if (buf.isReadable()) {
+      trailingData = new byte[buf.readableBytes()];
+      buf.readBytes(trailingData);
+    }
   }
 
   @Override
@@ -61,6 +82,10 @@ public class StatusResponsePacket implements MinecraftPacket {
       throw new IllegalStateException("Status is not specified");
     }
     ProtocolUtils.writeString(buf, status);
+    // Re-append trailing bytes if present
+    if (trailingData != null && trailingData.length > 0) {
+      buf.writeBytes(trailingData);
+    }
   }
 
   @Override
@@ -70,6 +95,10 @@ public class StatusResponsePacket implements MinecraftPacket {
 
   @Override
   public int encodeSizeHint(Direction direction, ProtocolVersion version) {
-    return ProtocolUtils.stringSizeHint(this.status);
+    int hint = ProtocolUtils.stringSizeHint(this.status);
+    if (trailingData != null) {
+      hint += trailingData.length;
+    }
+    return hint;
   }
 }

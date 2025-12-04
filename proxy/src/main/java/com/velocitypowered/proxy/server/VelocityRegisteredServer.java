@@ -99,18 +99,33 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
   }
 
   /**
-   * Pings the specified server using the specified event {@code loop}, claiming to be {@code
+   * Pings the specified server using the specified event {@code loop}, claiming
+   * to be {@code
    * version}.
    *
-   * @param loop    the event loop to use
+   * @param loop        the event loop to use
    * @param pingOptions the options to apply to this ping
    * @return the server list ping response
    */
   public CompletableFuture<ServerPing> ping(@Nullable EventLoop loop, PingOptions pingOptions) {
+    return pingInternal(loop, pingOptions).thenApply(ServerPingResponse::ping);
+  }
+
+  /**
+   * Pings the specified server and returns the full response including trailing
+   * data.
+   * This is used internally for ping passthrough to preserve mod data (e.g.,
+   * BetterCompatibilityChecker).
+   *
+   * @param loop        the event loop to use
+   * @param pingOptions the options to apply to this ping
+   * @return the server ping response with trailing data
+   */
+  public CompletableFuture<ServerPingResponse> pingInternal(@Nullable EventLoop loop, PingOptions pingOptions) {
     if (server == null) {
       throw new IllegalStateException("No Velocity proxy instance available");
     }
-    CompletableFuture<ServerPing> pingFuture = new CompletableFuture<>();
+    CompletableFuture<ServerPingResponse> pingFuture = new CompletableFuture<>();
     server.createBootstrap(loop).handler(new ChannelInitializer<>() {
       @Override
       protected void initChannel(Channel ch) {
@@ -118,7 +133,8 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
             .addLast(READ_TIMEOUT, new ReadTimeoutHandler(
                 pingOptions.getTimeout() == 0
                     ? server.getConfiguration().getReadTimeout()
-                    : pingOptions.getTimeout(), TimeUnit.MILLISECONDS))
+                    : pingOptions.getTimeout(),
+                TimeUnit.MILLISECONDS))
             .addLast(FRAME_ENCODER, MinecraftVarintLengthEncoder.INSTANCE)
             .addLast(MINECRAFT_DECODER, new MinecraftDecoder(ProtocolUtils.Direction.CLIENTBOUND))
             .addLast(MINECRAFT_ENCODER, new MinecraftEncoder(ProtocolUtils.Direction.SERVERBOUND));
@@ -155,9 +171,8 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
 
   @Override
   public boolean sendPluginMessage(
-          final @NotNull ChannelIdentifier identifier,
-          final @NotNull PluginMessageEncoder dataEncoder
-  ) {
+      final @NotNull ChannelIdentifier identifier,
+      final @NotNull PluginMessageEncoder dataEncoder) {
     requireNonNull(identifier);
     requireNonNull(dataEncoder);
     final ByteBuf buf = Unpooled.buffer();
@@ -172,7 +187,8 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
   }
 
   /**
-   * Sends a plugin message to the server through this connection. The message will be released
+   * Sends a plugin message to the server through this connection. The message
+   * will be released
    * afterwards.
    *
    * @param identifier the channel ID to use
@@ -183,7 +199,7 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
     for (final ConnectedPlayer player : players.values()) {
       final VelocityServerConnection serverConnection = player.getConnectedServer();
       if (serverConnection != null && serverConnection.getConnection() != null
-              && serverConnection.getServer() == this) {
+          && serverConnection.getServer() == this) {
         return serverConnection.sendPluginMessage(identifier, data);
       }
     }
