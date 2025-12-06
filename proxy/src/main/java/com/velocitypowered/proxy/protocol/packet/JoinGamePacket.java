@@ -53,6 +53,7 @@ public class JoinGamePacket implements MinecraftPacket {
   private int portalCooldown; // 1.20+
   private int seaLevel; // 1.21.2+
   private boolean enforcesSecureChat; // 1.20.5+
+  private ByteBuf trailingData; // Preserve trailing bytes for mod compatibility (e.g., Hodgepodge)
 
   public int getEntityId() {
     return entityId;
@@ -223,7 +224,8 @@ public class JoinGamePacket implements MinecraftPacket {
       // haha funny, they made 1.20.2 more complicated
       this.decode1202Up(buf, version);
     } else if (version.noLessThan(ProtocolVersion.MINECRAFT_1_16)) {
-      // Minecraft 1.16 and above have significantly more complicated logic for reading this packet,
+      // Minecraft 1.16 and above have significantly more complicated logic for
+      // reading this packet,
       // so separate it out.
       this.decode116Up(buf, version);
     } else {
@@ -258,6 +260,11 @@ public class JoinGamePacket implements MinecraftPacket {
     }
     if (version.noLessThan(ProtocolVersion.MINECRAFT_1_15)) {
       this.showRespawnScreen = buf.readBoolean();
+    }
+    // Preserve trailing bytes for mod compatibility (e.g., Hodgepodge dimension ID
+    // fix)
+    if (buf.isReadable()) {
+      this.trailingData = buf.readRetainedSlice(buf.readableBytes());
     }
   }
 
@@ -369,7 +376,8 @@ public class JoinGamePacket implements MinecraftPacket {
       // haha funny, they made 1.20.2 more complicated
       this.encode1202Up(buf, version);
     } else if (version.noLessThan(ProtocolVersion.MINECRAFT_1_16)) {
-      // Minecraft 1.16 and above have significantly more complicated logic for reading this packet,
+      // Minecraft 1.16 and above have significantly more complicated logic for
+      // reading this packet,
       // so separate it out.
       this.encode116Up(buf, version);
     } else {
@@ -409,6 +417,11 @@ public class JoinGamePacket implements MinecraftPacket {
     }
     if (version.noLessThan(ProtocolVersion.MINECRAFT_1_15)) {
       buf.writeBoolean(showRespawnScreen);
+    }
+    // Write trailing bytes for mod compatibility (e.g., Hodgepodge dimension ID
+    // fix)
+    if (trailingData != null && trailingData.isReadable()) {
+      buf.writeBytes(trailingData, trailingData.readerIndex(), trailingData.readableBytes());
     }
   }
 
