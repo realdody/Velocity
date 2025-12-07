@@ -34,27 +34,26 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Frames Minecraft server packets which are prefixed by a 21-bit VarInt encoding.
+ * Frames Minecraft server packets which are prefixed by a 21-bit VarInt
+ * encoding.
  */
 public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
 
   private static final Logger LOGGER = LogManager.getLogger(MinecraftVarintFrameDecoder.class);
-  private static final QuietRuntimeException FRAME_DECODER_FAILED =
-      new QuietRuntimeException("A packet frame decoder failed. For more information, launch "
+  private static final QuietRuntimeException FRAME_DECODER_FAILED = new QuietRuntimeException(
+      "A packet frame decoder failed. For more information, launch "
           + "Velocity with -Dvelocity.packet-decode-logging=true to see more.");
-  private static final QuietDecoderException BAD_PACKET_LENGTH =
-      new QuietDecoderException("Bad packet length");
-  private static final QuietDecoderException VARINT_TOO_BIG =
-      new QuietDecoderException("VarInt too big");
-  private static final QuietDecoderException UNKNOWN_PACKET =
-      new QuietDecoderException("Unknown packet");
+  private static final QuietDecoderException BAD_PACKET_LENGTH = new QuietDecoderException("Bad packet length");
+  private static final QuietDecoderException VARINT_TOO_BIG = new QuietDecoderException("VarInt too big");
+  private static final QuietDecoderException UNKNOWN_PACKET = new QuietDecoderException("Unknown packet");
 
   private final ProtocolUtils.Direction direction;
   private final StateRegistry.PacketRegistry.ProtocolRegistry registry;
   private StateRegistry state;
 
   /**
-   * Creates a new {@code MinecraftVarintFrameDecoder} decoding packets from the specified {@code Direction}.
+   * Creates a new {@code MinecraftVarintFrameDecoder} decoding packets from the
+   * specified {@code Direction}.
    *
    * @param direction the direction from which we decode from
    */
@@ -110,8 +109,8 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
   }
 
   private boolean validateServerboundHandshakePacket(ByteBuf in, int length) throws Exception {
-    StateRegistry.PacketRegistry.ProtocolRegistry registry =
-        state.getProtocolRegistry(direction, ProtocolVersion.MINIMUM_VERSION);
+    StateRegistry.PacketRegistry.ProtocolRegistry registry = state.getProtocolRegistry(direction,
+        ProtocolVersion.MINIMUM_VERSION);
 
     final int index = in.readerIndex();
     final int packetId = readRawVarInt21(in);
@@ -124,12 +123,14 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
 
     MinecraftPacket packet = registry.createPacket(packetId);
 
-    // We handle every packet in this phase, if you said something we don't know, something is really wrong
+    // We handle every packet in this phase, if you said something we don't know,
+    // something is really wrong
     if (packet == null) {
       throw UNKNOWN_PACKET;
     }
 
-    // We 'technically' have the incoming bytes of a payload here, and so, these can actually parse
+    // We 'technically' have the incoming bytes of a payload here, and so, these can
+    // actually parse
     // the packet if needed, so, we'll take advantage of the existing methods
     int expectedMinLen = packet.decodeExpectedMinLength(in, direction, registry.version);
     int expectedMaxLen = packet.decodeExpectedMaxLength(in, direction, registry.version);
@@ -155,44 +156,16 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
   }
 
   /**
-   * Reads a VarInt from the buffer of up to 21 bits in size.
+   * Reads a VarInt from the buffer of up to 32 bits in size (5 bytes).
+   * Extended from 21-bit to support PacketFixer's larger packets.
    *
    * @param buffer the buffer to read from
    * @return the VarInt decoded, {@code 0} if no varint could be read
    * @throws QuietDecoderException if the VarInt is too big to be decoded
    */
   private static int readRawVarInt21(ByteBuf buffer) {
-    if (buffer.readableBytes() < 4) {
-      // we don't have enough that we can read a potentially full varint, so fall back to
-      // the slow path.
-      return readRawVarintSmallBuf(buffer);
-    }
-    int wholeOrMore = buffer.getIntLE(buffer.readerIndex());
-
-    // take the last three bytes and check if any of them have the high bit set
-    int atStop = ~wholeOrMore & 0x808080;
-    if (atStop == 0) {
-      // all bytes have the high bit set, so the varint we are trying to decode is too wide
-      throw VARINT_TOO_BIG;
-    }
-
-    int bitsToKeep = Integer.numberOfTrailingZeros(atStop) + 1;
-    buffer.skipBytes(bitsToKeep >> 3);
-
-    // remove all bits we don't need to keep, a trick from
-    // https://github.com/netty/netty/pull/14050#issuecomment-2107750734:
-    //
-    // > The idea is that thisVarintMask has 0s above the first one of firstOneOnStop, and 1s at
-    // > and below it. For example if firstOneOnStop is 0x800080 (where the last 0x80 is the only
-    // > one that matters), then thisVarintMask is 0xFF.
-    //
-    // this is also documented in Hacker's Delight, section 2-1 "Manipulating Rightmost Bits"
-    int preservedBytes = wholeOrMore & (atStop ^ (atStop - 1));
-
-    // merge together using this trick: https://github.com/netty/netty/pull/14050#discussion_r1597896639
-    preservedBytes = (preservedBytes & 0x007F007F) | ((preservedBytes & 0x00007F00) >> 1);
-    preservedBytes = (preservedBytes & 0x00003FFF) | ((preservedBytes & 0x3FFF0000) >> 2);
-    return preservedBytes;
+    // Use the full 5-byte VarInt reader for PacketFixer compatibility
+    return readRawVarintSmallBuf(buffer);
   }
 
   private static int readRawVarintSmallBuf(ByteBuf buffer) {
@@ -201,27 +174,19 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
     }
     buffer.markReaderIndex();
 
-    byte tmp = buffer.readByte();
-    if (tmp >= 0) {
-      return tmp;
+    int result = 0;
+    for (int i = 0; i < 5; i++) {
+      if (!buffer.isReadable()) {
+        buffer.resetReaderIndex();
+        return 0;
+      }
+      byte tmp = buffer.readByte();
+      result |= (tmp & 0x7F) << (i * 7);
+      if (tmp >= 0) {
+        return result;
+      }
     }
-    int result = tmp & 0x7F;
-    if (!buffer.isReadable()) {
-      buffer.resetReaderIndex();
-      return 0;
-    }
-    if ((tmp = buffer.readByte()) >= 0) {
-      return result | tmp << 7;
-    }
-    result |= (tmp & 0x7F) << 7;
-    if (!buffer.isReadable()) {
-      buffer.resetReaderIndex();
-      return 0;
-    }
-    if ((tmp = buffer.readByte()) >= 0) {
-      return result | tmp << 14;
-    }
-    return result | (tmp & 0x7F) << 14;
+    throw VARINT_TOO_BIG;
   }
 
   private Exception handleOverflow(MinecraftPacket packet, int expected, int actual) {

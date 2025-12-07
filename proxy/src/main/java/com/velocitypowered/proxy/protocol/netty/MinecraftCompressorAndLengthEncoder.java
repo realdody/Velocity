@@ -57,23 +57,23 @@ public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<By
       throws DataFormatException {
     int uncompressed = msg.readableBytes();
 
-    out.writeMedium(0); // Reserve the packet length
-    ProtocolUtils.writeVarInt(out, uncompressed);
-    ByteBuf compatibleIn = MoreByteBufUtils.ensureCompatible(ctx.alloc(), compressor, msg);
-
-    int startCompressed = out.writerIndex();
+    // Compress to a temporary buffer first
+    ByteBuf payload = ctx.alloc().buffer();
     try {
-      compressor.deflate(compatibleIn, out);
-    } finally {
-      compatibleIn.release();
-    }
-    int compressedLength = out.writerIndex() - startCompressed;
-    if (compressedLength >= 1 << 21) {
-      throw new DataFormatException("The server sent a very large (over 2MiB compressed) packet.");
-    }
+      ProtocolUtils.writeVarInt(payload, uncompressed);
+      ByteBuf compatibleIn = MoreByteBufUtils.ensureCompatible(ctx.alloc(), compressor, msg);
+      try {
+        compressor.deflate(compatibleIn, payload);
+      } finally {
+        compatibleIn.release();
+      }
 
-    int packetLength = out.readableBytes() - 3;
-    out.setMedium(0, ProtocolUtils.encode21BitVarInt(packetLength)); // Rewrite packet length
+      // Write length prefix then copy payload
+      ProtocolUtils.writeVarInt(out, payload.readableBytes());
+      out.writeBytes(payload);
+    } finally {
+      payload.release();
+    }
   }
 
   @Override
@@ -88,8 +88,10 @@ public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<By
           : ctx.alloc().directBuffer(finalBufferSize);
     }
 
-    // (maximum data length after compression) + packet length varint + uncompressed data varint
-    int initialBufferSize = (uncompressed - 1) + 3 + ProtocolUtils.varIntBytes(uncompressed);
+    // (maximum data length after compression) + packet length varint (up to 5) +
+    // uncompressed
+    // data varint
+    int initialBufferSize = (uncompressed - 1) + 5 + ProtocolUtils.varIntBytes(uncompressed);
     return MoreByteBufUtils.preferredBuffer(ctx.alloc(), compressor, initialBufferSize);
   }
 
