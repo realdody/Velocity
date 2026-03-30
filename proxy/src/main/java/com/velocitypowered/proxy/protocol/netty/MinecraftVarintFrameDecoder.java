@@ -44,6 +44,8 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
       "A packet frame decoder failed. For more information, launch "
           + "Velocity with -Dvelocity.packet-decode-logging=true to see more.");
   private static final QuietDecoderException BAD_PACKET_LENGTH = new QuietDecoderException("Bad packet length");
+  private static final QuietDecoderException INVALID_PREAMBLE = new QuietDecoderException(
+      "Invalid packet preamble");
   private static final QuietDecoderException VARINT_TOO_BIG = new QuietDecoderException("VarInt too big");
   private static final QuietDecoderException UNKNOWN_PACKET = new QuietDecoderException("Unknown packet");
 
@@ -136,23 +138,23 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
 
       MinecraftPacket packet = registry.createPacket(packetId);
 
-    // We handle every packet in this phase, if you said something we don't know,
-    // something is really wrong
-    if (packet == null) {
-      throw UNKNOWN_PACKET;
-    }
+      // We handle every packet in this phase, if you said something we don't know,
+      // something is really wrong
+      if (packet == null) {
+        throw UNKNOWN_PACKET;
+      }
 
-    // We 'technically' have the incoming bytes of a payload here, and so, these can
-    // actually parse
-    // the packet if needed, so, we'll take advantage of the existing methods
-    int expectedMinLen = packet.decodeExpectedMinLength(in, direction, registry.version);
-    int expectedMaxLen = packet.decodeExpectedMaxLength(in, direction, registry.version);
-    if (expectedMaxLen != -1 && payloadLength > expectedMaxLen) {
-      throw handleOverflow(packet, expectedMaxLen, in.readableBytes());
-    }
-    if (payloadLength < expectedMinLen) {
-      throw handleUnderflow(packet, expectedMaxLen, in.readableBytes());
-    }
+      // We 'technically' have the incoming bytes of a payload here, and so, these can
+      // actually parse
+      // the packet if needed, so, we'll take advantage of the existing methods
+      int expectedMinLen = packet.decodeExpectedMinLength(in, direction, registry.version);
+      int expectedMaxLen = packet.decodeExpectedMaxLength(in, direction, registry.version);
+      if (expectedMaxLen != -1 && payloadLength > expectedMaxLen) {
+        throw handleOverflow(packet, expectedMaxLen, in.readableBytes());
+      }
+      if (payloadLength < expectedMinLen) {
+        throw handleUnderflow(packet, expectedMaxLen, in.readableBytes());
+      }
 
       in.readerIndex(index);
       return false;
