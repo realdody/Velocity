@@ -104,7 +104,7 @@ public class ServerListPingHandler {
     switch (mode) {
       case ALL:
         return pingResponses.thenApply(responses -> {
-          // Find the first non-fallback - preserve trailing data for BCC compatibility
+          // Find the first non-fallback and keep any backend-specific extensions.
           for (ServerPingResponse response : responses) {
             if (response == fallback) {
               continue;
@@ -115,6 +115,7 @@ public class ServerListPingHandler {
                   response.ping().asBuilder()
                       .description(Component.empty())
                       .build(),
+                  response.statusJson(),
                   response.trailingData());
             }
 
@@ -124,15 +125,17 @@ public class ServerListPingHandler {
         });
       case MODS:
         return pingResponses.thenApply(responses -> {
-          // Find the first non-fallback that contains a mod list
-          // Note: MODS mode constructs a new ping, so trailing data is not preserved
+          // Find the first non-fallback that contains a mod list.
           for (ServerPingResponse response : responses) {
             if (response == fallback) {
               continue;
             }
             Optional<ModInfo> modInfo = response.ping().getModinfo();
             if (modInfo.isPresent()) {
-              return new ServerPingResponse(fallback.ping().asBuilder().mods(modInfo.get()).build());
+              return new ServerPingResponse(
+                  fallback.ping().asBuilder().mods(modInfo.get()).build(),
+                  response.statusJson(),
+                  response.trailingData());
             }
           }
           return fallback;
@@ -140,8 +143,6 @@ public class ServerListPingHandler {
       case DESCRIPTION:
         return pingResponses.thenApply(responses -> {
           // Find the first non-fallback. If it includes a modlist, add it too.
-          // Note: DESCRIPTION mode constructs a new ping, so trailing data is not
-          // preserved
           for (ServerPingResponse response : responses) {
             if (response == fallback) {
               continue;
@@ -156,7 +157,9 @@ public class ServerListPingHandler {
                 fallback.ping().getPlayers().orElse(null),
                 response.ping().getDescriptionComponent(),
                 fallback.ping().getFavicon().orElse(null),
-                response.ping().getModinfo().orElse(null)));
+                response.ping().getModinfo().orElse(null)),
+                response.statusJson(),
+                response.trailingData());
           }
 
           return fallback;

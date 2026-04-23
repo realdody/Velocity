@@ -17,7 +17,11 @@
 
 package com.velocitypowered.proxy.connection.client;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
+import com.velocitypowered.api.proxy.server.ServerPing;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
@@ -29,6 +33,7 @@ import com.velocitypowered.proxy.protocol.packet.StatusRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusResponsePacket;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
+import java.util.Set;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -37,6 +42,12 @@ import org.apache.logging.log4j.Logger;
  */
 public class StatusSessionHandler implements MinecraftSessionHandler {
 
+  private static final Set<String> STANDARD_STATUS_KEYS = Set.of(
+      "version",
+      "players",
+      "description",
+      "favicon",
+      "modinfo");
   private static final Logger logger = LogManager.getLogger(StatusSessionHandler.class);
   private static final QuietRuntimeException EXPECTED_AWAITING_REQUEST = new QuietRuntimeException(
       "Expected connection to be awaiting status request");
@@ -67,10 +78,12 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
     }
     this.pingReceived = true;
     server.getServerListPingHandler().getInitialPing(this.inbound)
-        .thenCompose(pingResponse -> server.getEventManager().fire(new ProxyPingEvent(inbound, pingResponse.ping())))
+        .thenCompose(pingResponse ->
+            server.getEventManager().fire(new ProxyPingEvent(inbound, pingResponse.ping())))
         .thenAcceptAsync(event -> {
           if (event.getResult().isAllowed()) {
-            connection.closeWith(LegacyDisconnect.fromServerPing(event.getPing(), packet.getVersion()));
+            connection.closeWith(
+                LegacyDisconnect.fromServerPing(event.getPing(), packet.getVersion()));
           } else {
             connection.close();
           }
@@ -97,19 +110,24 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
 
     this.server.getServerListPingHandler().getInitialPing(inbound)
         .thenCompose(pingResponse -> {
-          // Fire ProxyPingEvent with the ServerPing (API-compatible)
-          // but preserve trailing data for the response
+          // Fire ProxyPingEvent with the API ping while keeping backend-specific
+          // extensions that are not represented by ServerPing itself.
           return server.getEventManager().fire(new ProxyPingEvent(inbound, pingResponse.ping()))
-              .thenApply(event -> new PingEventResult(event, pingResponse.trailingData()));
+              .thenApply(event -> new PingEventResult(
+                  event,
+                  pingResponse.statusJson(),
+                  pingResponse.trailingData()));
         })
         .thenAcceptAsync(
             (result) -> {
               if (result.event.getResult().isAllowed()) {
-                final StringBuilder json = new StringBuilder();
-                VelocityServer.getPingGsonInstance(connection.getProtocolVersion())
-                    .toJson(result.event.getPing(), json);
-                // Include trailing data (e.g., BetterCompatibilityChecker mod data)
-                connection.write(new StatusResponsePacket(json, result.trailingData));
+                Gson pingGson = VelocityServer.getPingGsonInstance(connection.getProtocolVersion());
+                connection.write(new StatusResponsePacket(
+                    serializeStatusJson(
+                        pingGson,
+                        result.event.getPing(),
+                        result.statusJson),
+                    result.trailingData));
               } else {
                 connection.close();
               }
@@ -128,10 +146,34 @@ public class StatusSessionHandler implements MinecraftSessionHandler {
     connection.close(true);
   }
 
+  private static String serializeStatusJson(
+      Gson pingGson,
+      ServerPing ping,
+      JsonObject preservedStatusJson) {
+    JsonElement serializedPing = pingGson.toJsonTree(ping);
+    if (!serializedPing.isJsonObject()) {
+      return pingGson.toJson(ping);
+    }
+    if (preservedStatusJson == null) {
+      return pingGson.toJson(serializedPing);
+    }
+
+    JsonObject statusJson = serializedPing.getAsJsonObject();
+    for (java.util.Map.Entry<String, JsonElement> entry : preservedStatusJson.entrySet()) {
+      if (!STANDARD_STATUS_KEYS.contains(entry.getKey()) && !statusJson.has(entry.getKey())) {
+        statusJson.add(entry.getKey(), entry.getValue().deepCopy());
+      }
+    }
+    return pingGson.toJson(statusJson);
+  }
+
   /**
-   * Internal record to pass both ProxyPingEvent and trailing data through the
-   * async chain.
+   * Internal record to pass both ProxyPingEvent and preserved backend data
+   * through the async chain.
    */
-  private record PingEventResult(ProxyPingEvent event, byte[] trailingData) {
+  private record PingEventResult(
+      ProxyPingEvent event,
+      JsonObject statusJson,
+      byte[] trailingData) {
   }
 }

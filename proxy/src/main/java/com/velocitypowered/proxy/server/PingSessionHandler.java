@@ -17,6 +17,9 @@
 
 package com.velocitypowered.proxy.server;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.velocitypowered.api.network.HandshakeIntent;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
@@ -79,10 +82,11 @@ public class PingSessionHandler implements MinecraftSessionHandler {
     completed = true;
     connection.close(true);
 
-    ServerPing ping = VelocityServer.getPingGsonInstance(version).fromJson(packet.getStatus(),
-        ServerPing.class);
-    // Preserve trailing data (e.g., BetterCompatibilityChecker mod data)
-    result.complete(new ServerPingResponse(ping, packet.getTrailingData()));
+    JsonElement statusElement = JsonParser.parseString(packet.getStatus());
+    JsonObject statusJson = statusElement.isJsonObject() ? statusElement.getAsJsonObject() : null;
+    ServerPing ping = VelocityServer.getPingGsonInstance(version)
+        .fromJson(statusElement, ServerPing.class);
+    result.complete(new ServerPingResponse(ping, statusJson, packet.getTrailingData()));
     return true;
   }
 
